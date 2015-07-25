@@ -1,0 +1,176 @@
+---
+title: "Project Report for Practical Machine Learning"
+author: "Victor Li"
+date: "Friday, July 24, 2015"
+output: html_document
+---
+
+#Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise, which is depicted by the "classe" column in given data.
+
+#Prepare Data
+
+##Download Data
+The training data for this project are available here: 
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here: 
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+For some reason "download.file" doesn't work with "https" scheme when running in Knitr, so we downloaded both data file ahead and then run Knitr to generate this report.
+
+```{r warning=FALSE}
+library(caret)
+```
+
+```{r warning=FALSE, results='hide', eval=FALSE}
+# Download PML train and test data
+trainFile <- "pml-training.csv"
+testFile <- "pml-testing.csv" 
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = trainFile, method = "auto")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = testFile, method = "auto")
+```
+
+```{r}
+# Load data to memory
+trainRawData <- read.csv("pml-training.csv")
+testRawData <- read.csv("pml-testing.csv")
+```
+
+##Examine Data Quality
+
+First we quick check the dimension of input data. As shown below, the train data has 19622 observations with 160 columns, while the test data has 20 observations and 160 columns.
+
+```{r}
+dim(trainRawData)
+dim(testRawData)
+```
+
+To build model to predict exercise manner (depicted by classe column), we hope there should be enough data for each manner in the train data set. The following histogram shows that they have nearly even data per manner, so we should be good.
+
+```{r}
+# Distribution of train data per Classe
+histogram(trainRawData$classe)
+```
+
+## Data Cleanup
+
+However, when we browse the train data, we noticed there are couple of issues which may harm model training:
+
+- There are lots of NA data which are not useless to train a model
+- Non numeric columns are not useful here as well
+- Columns like user name, timestamp are not meaningful to exercise manner
+
+So we clean up these columns first. However the column "classe" should be kept because we need build model to predict it.
+
+We cleaned both train and test data in same way:
+
+```{r}
+# Clean data
+CleanRawData <- function(rawData)
+{
+    # Remove column which has too many NA values (more than 30%)
+    data <- rawData[, colSums(is.na(rawData)) / nrow(rawData) < 0.30]
+    
+    # Remove column which are not likely related to classe
+    toRemove <- grepl("^(X|user_name)$|_(timestamp|window)", names(data))
+    data <- data[, !toRemove]
+    
+    # Remove non-numeric columns, but keeping classe column
+    classe <- data$classe
+    data <- data[, sapply(data, is.numeric)]
+    data$classe <- classe
+    
+    return(data)
+}
+
+trainData <- CleanRawData(trainRawData)
+testData <- CleanRawData(testRawData)
+```
+
+Now we can see the number of columns drop to 53 for both data:
+
+```{r}
+dim(trainData)
+dim(testData)
+```
+
+#Build Model with Train Data
+
+Now we can go ahead to train the model with given train data. To help cross validation, we split the given data to 2 parts:
+
+- Train data: 60%, used to build model
+- Test data: 40%, used to validate the model for accuracy
+
+```{r warning=FALSE}
+# Partition data for cross validation
+set.seed(12345)
+trainIndex <- createDataPartition(trainData$classe, p=0.60, list=FALSE)
+modelTrainData <- trainData[trainIndex, ]
+modelTestData <- trainData[-trainIndex, ]
+```
+
+There are many models availabe for machine learning. In this project we simply choose 2 typical models to build:
+
+- Decision Tree model
+- Random Forest model
+
+Then based on their accuracy of predicting test data, we choose the better one as our final model.
+
+## Decision Tree
+
+First we use train data to build the decision tree model:
+
+```{r}
+# Build model with train data: Decision Tree
+modelDT <- train(classe ~ ., data = modelTrainData, method = "rpart")
+modelDT
+```
+
+Then apply this model to the test data and predict the exercise manner:
+
+```{r}
+# Validate model with test data
+predictDT <- predict(modelDT, modelTestData)
+confusionMatrix(modelTestData$classe, predictDT)
+```
+
+As we can see, the accuracy for prediction is quite low: only around 50%. 
+
+## Random Forest
+
+To build the Random Forest model with train data, we choose 4 round cross validation to find optimal model:
+
+```{r warning=FALSE}
+# Build model with train data: Random Forest with 4 round cross validation
+controlRF <- trainControl(method = "cv", number = 4)
+modelRF <- train(classe ~ ., data = modelTrainData, method = "rf", trControl = controlRF)
+modelRF
+```
+
+Then predict the test data with result model:
+
+```{r}
+# Validate model with test data
+predictRF <- predict(modelRF, modelTestData)
+confusionMatrix(modelTestData$classe, predictRF)
+```
+
+The accuracy shown here is much better and almost close to 100%. We will use this model to predict the final test data as required by this project.
+
+#Predict Test Data
+
+Now we apply the generated Random Forest model to predict our final test data:
+
+```{r}
+# Random Forest model wins!
+# Predict the provided test data
+predict(modelRF, testData)
+```
+
+The results are submitted to Coursera and passed 100%.
